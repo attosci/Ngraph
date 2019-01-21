@@ -1,0 +1,314 @@
+# album.nsc: make an album
+# an addin file for Ngraph 6.06.06 (ngraph-gtk)
+# version 0.10 on August 11, 2012 by attosci
+
+viewer_id=${gra:viewer:id}
+files="*.ngp"
+action="2"
+album="album"
+width=${gra::paper_width}
+height=${gra::paper_height}
+merge_width=$width
+merge_height=$height
+topmargin=1000
+bottommargin=1000
+leftmargin=1000
+rightmargin=1000
+nx=4; ny=4; zoom=2500
+
+delete_drawable() {
+  for i in `derive -instance draw fit`; do
+    del ${i}:0-!
+  done
+}
+
+delete_album() {
+  if exist merge:album > /dev/null; then
+    del merge:album
+  fi
+}
+
+transfer_gra() {
+  gra:$2:close
+  eval gra:$2:top_margin='${'gra:$1:top_margin'}'
+  eval gra:$2:left_margin='${'gra:$1:left_margin'}'
+  eval gra:$2:zoom='${'gra:$1:zoom'}'
+  eval gra:$2:draw_obj='${'gra:$1:draw_obj'}'
+  gra:$2:open
+}
+
+query_files() {
+  new dialog
+  dialog::title="Target files"
+  dialog::caption="Target NGP/PRM/GRA files"
+  files=`get dialog -field input:"$files"`
+  del dialog
+}
+
+query_action() {
+  new dialog
+  dialog::title="Select action"
+  dialog::caption="Select action for each file"
+  dialog::select="$action"
+  new sarray name=selection
+  sarray::add "View"
+  sarray::add "Print"
+  sarray::add "Make NGP files"
+  sarray::add "Make GRA files"
+  sarray::add "Make EPS files"
+  action=`get dialog: -field radio:"sarray:selection"`
+  del sarray:selection
+  del dialog
+
+  case $action in
+  0|1)
+  ;;
+  2|3|4)
+    new dialog
+    dialog::title="Album name"
+    dialog::caption="Album name"
+    album=`get dialog -field input:"$album"`
+    del dialog
+  ;;
+  *)
+    new dialog
+    dialog::beep
+    dialog::message:"Invalid action: ${action}"
+    del dialog
+    exit
+  ;;
+  esac
+}
+
+query_format() {
+  new dialog
+  dialog::caption="nx ny zoom"
+  input=`get dialog -field input:"${nx} ${ny} ${zoom}"`
+  del dialog
+  set dummy $input
+  case $# in
+  4)
+    nx=$2
+    ny=$3
+    zoom=$4
+  ;;
+  *)
+    new dialog
+    dialog::beep
+    dialog::message:"Invalid input: $input"
+    del dialog
+    exit
+  ;;
+  esac
+}
+
+output_viewer() {
+  gra:viewer:clear
+  gra:viewer:draw
+  gra:viewer:flush
+}
+
+output_printer() {
+  menu::print:"false 0"
+}
+
+output_ngp() {
+  echo "#!ngraph" > "$1"
+  echo "#%creator:" ${system:0:name} >> "$1"
+  echo "#%version:" ${system:0:version} >> "$1"
+  for drawable in `derive -instance draw`; do
+    get ${drawable}:0-! -id -field save >> "$1"
+  done
+  get gra:0 -id -field save >> "$1"
+}
+
+output_gra() {
+  new gra2file name=gra2file
+  gra2file::file="$1"
+  new gra
+  gra::device=gra2file:gra2file
+  gra::open
+  gra::clear
+  gra::draw
+  gra::flush
+  gra::close
+  del gra
+  del gra2file
+}
+
+output_eps() {
+  new gra2cairofile name=gra2cairofile
+  gra2cairofile::file="$1"
+  gra2cairofile::format="eps3"
+  new gra
+  gra::device=gra2cairofile:gra2cairofile
+  gra::open
+  gra::clear
+  gra::draw
+  gra::flush
+  gra::close
+  del gra
+  del gra2cairofile
+}
+
+convert_ngp_to_gra() {
+  system:0:hide_instance `derive draw fit`
+  . "$1"
+  menu::ngp="$1"
+  id=${gra::id}
+  if [ $id != $viewer_id ]; then
+    transfer_gra $id $viewer_id
+    del gra:$id
+  fi
+  output_gra "$2"
+  delete_drawable
+  system:0:recover_instance `derive draw fit`
+}
+
+convert_prm_to_gra() {
+  system:0:hide_instance `derive draw fit`
+  new prm
+  prm::symbol_greek=true
+  prm::ignore_path=true
+  prm::file="$1"
+  prm::load
+  del prm
+  output_gra "$2"
+  delete_drawable
+  system:0:recover_instance `derive draw fit`
+}
+
+do_output() {
+  menu::ngp="${album}_${serial}.ngp"
+  output_viewer
+  case $action in
+  0)
+    sleep 1
+  ;;
+  1)
+    output_printer
+  ;;
+  2)
+    output_ngp "${album}_${serial}.ngp"
+  ;;
+  3)
+    output_gra "${album}_${serial}.gra"
+  ;;
+  4)
+    output_eps "${album}_${serial}.eps"
+  ;;
+  esac
+  serial=`iexpr "$serial+1"`
+}
+
+load_parameter() {
+  if exist text:album > /dev/null; then
+    put text:album name:album
+    set dummy ${text::text}
+    topmargin=$2
+    bottommargin=$3
+    leftmargin=$4
+    rightmargin=$5
+    action=$6
+    album=$7
+    nx=$8
+    ny=$9
+    zoom=$10
+  fi
+  if exist text:album_files > /dev/null; then
+    put text:album_files name:album_files
+    files="${text::text}"
+  fi
+}
+
+save_parameter() {
+  if exist text:album > /dev/null; then
+    put text:album name:album
+  else
+    new text name:album
+    text::hidden=true
+  fi
+  text::text="$topmargin $bottommargin $leftmargin $rightmargin $action $album $nx $ny $zoom n"
+  if exist text:album_files > /dev/null; then
+    put text:album_files name:album_files
+  else
+    new text name:album_files
+    text::hidden=true
+  fi
+  text::text="$files"
+}
+
+set_filelist() {
+  if exist sarray:filelist > /dev/null; then
+    del sarray:filelist
+  fi
+  new sarray name:filelist
+  for i in $files; do
+    sarray:filelist:add:$i
+  done
+}
+
+#
+# main
+#
+
+load_parameter
+query_files
+query_action
+query_format
+delete_drawable
+save_parameter
+set_filelist
+counter=0
+serial=1
+ix=0
+iy=0
+while [ "$counter" -lt "${sarray:filelist:num}" ]; do
+  file="`get sarray:filelist -field get:$counter`"
+  if [ ! -f "$file" ]; then
+    break
+  fi
+  counter=`iexpr "$counter+1"`
+  case "$file" in
+  *.ngp|*.NGP)
+    merge_file="${file%.*}.gra"
+    convert_ngp_to_gra "$file" "$merge_file"
+  ;;
+  *.prm|*.PRM)
+    merge_file="${file%.*}.gra"
+    convert_prm_to_gra "$file" "$merge_file"
+  ;;
+  *.gra|*.GRA)
+    merge_file="$file"
+  ;;
+  *)
+    merge_file=""
+  ;;
+  esac
+  if [ "$merge_file" = "" ]; then
+    break
+  fi
+  if [ \( $ix -eq 0 \) -a \( $iy -eq 0 \) ]; then
+    delete_drawable
+    save_parameter
+  fi
+  tm=`iexpr "$topmargin+($height-$topmargin-$bottommargin)*($iy+0.5)/$ny"`
+  lm=`iexpr "$leftmargin+($width-$leftmargin-$rightmargin)*($ix+0.5)/$nx"`
+  new merge name=album
+  merge::file="$merge_file"
+  merge::top_margin=`iexpr "$tm-$merge_height*$zoom/20000.0"`
+  merge::left_margin=`iexpr "$lm-$merge_width*$zoom/20000.0"`
+  merge::zoom=$zoom
+  ix=`iexpr "$ix+1"`
+  if [ $ix -ge $nx ]; then 
+    ix=0
+    iy=`iexpr "$iy+1"`
+    if [ $iy -ge $ny ]; then
+      iy=0
+      do_output
+    fi
+  fi
+done
+if [ \( $ix -ne 0 \) -o \( $iy -ne 0 \) ]; then
+  do_output
+fi

@@ -1,0 +1,395 @@
+# batch.nsc: manipulate files by batch process
+# an addin file for Ngraph 6.06.06 (ngraph-gtk)
+# version 0.10 on August 11, 2012 by attosci
+
+viewer_id="${gra:viewer:id}"
+files="*.ngp"
+action="2"
+script="script.nsc"
+evalstr='echo $serial ${fit:0:%00} ${fit:0:%01} ${file:0:file} >> fit.dat'
+autoscale="n"
+
+delete_drawable() {
+  for i in `derive -instance draw fit`; do
+    del ${i}:0-!
+  done
+}
+
+delete_viewer() {
+  if [ `exist gra:viewer` -ne 0 ]; then
+    del gra:viewer
+  fi
+}
+
+transfer_gra() {
+  gra:$2:close
+  eval gra:$2:top_margin='${'gra:$1:top_margin'}'
+  eval gra:$2:left_margin='${'gra:$1:left_margin'}'
+  eval gra:$2:zoom='${'gra:$1:zoom'}'
+  eval gra:$2:draw_obj='${'gra:$1:draw_obj'}'
+  gra:$2:open
+}
+
+clear_axis() {
+  eval axis:$1:min=0
+  eval axis:$1:max=0
+  eval axis:$1:inc=0
+}
+
+axis_auto_scale() {
+  if [ "`object axis -instances`" -a "`object file -instances`" ]; then
+    eval axis:0-!:auto_scale:'file:0-!'
+  fi
+}
+
+query_files() {
+  new dialog
+  dialog::title="Target files"
+  dialog::caption="Target files. Use wild cards such as '*' and '?'."
+  files=`get dialog -field input:"$files"`
+  del dialog
+}
+
+query_action() {
+  new dialog
+  dialog::title="Select action"
+  dialog::caption="Select action for each file"
+  dialog::select="$action"
+  new sarray name=selection
+  sarray::add "View"
+  sarray::add "Print"
+  sarray::add "Make a NGP file"
+  sarray::add "Make a GRA file"
+  sarray::add "Make an EPS file"
+  sarray::add "Make an EMF file"
+  sarray::add "Execute an external script file"
+  sarray::add "Execute a one-line script"
+  action=`get dialog: -field radio:"sarray:selection"`
+  del sarray:selection
+  del dialog
+  case "$action" in
+  0|1|2|3|4|5)
+  ;;
+  6)
+    query_script
+  ;;
+  7)
+    query_evalstr
+  ;;
+  *)
+    new dialog
+    dialog::beep
+    dialog::message:"Invalid action: ${action}"
+    del dialog
+    exit
+  esac
+}
+
+query_script() {
+  new dialog
+  dialog::title="Select script file"
+  script=${dialog::get_open_file:'nsc'}
+  del dialog
+}
+
+query_evalstr() {
+  new dialog
+  dialog::title="One-line script"
+  dialog::caption="Enter one-line script"
+  evalstr=`get dialog -field input:"$evalstr"`
+  del dialog
+}
+
+query_autoscale() {
+  new dialog
+  dialog::title="Autoscale"
+  dialog::caption="Autoscale: y)es n)o lists (e.g. 0-!)"
+  autoscale=`get dialog -field input:"$autoscale"`
+  del dialog
+}
+
+load_ngp() {
+  delete_drawable
+  . "$1"
+  menu:0:ngp="$1"
+  id="${gra::id}"
+  if [ "$id" != "$viewer_id" ]; then
+    transfer_gra "$id" "$viewer_id"
+    del gra:$id
+  fi
+}
+
+load_ngraph_ngp() {
+  if [ -f "${NGRAPHHOME}/_Ngraph.ngp" ]; then
+    . "${NGRAPHHOME}/_Ngraph.ngp"
+  elif [ -f "${NGRAPHHOME}/.Ngraph.ngp" ]; then
+    . "${NGRAPHHOME}/.Ngraph.ngp"
+  elif [ -f "${NGRAPHLIB}/_Ngraph.ngp" ]; then
+    . "${NGRAPHLIB}/_Ngraph.ngp"
+  elif [ -f "${NGRAPHLIB}/.Ngraph.ngp" ]; then
+    . "${NGRAPHLIB}/.Ngraph.ngp"
+  fi
+  id="${gra::id}"
+  if [ "$id" != "$viewer_id" ]; then
+    transfer_gra "$id" "$viewer_id"
+    del gra:$id
+  fi
+}
+
+load_prm() {
+  delete_drawable
+  new prm
+  prm::symbol_greek=true
+  prm::ignore_path=true
+  prm::file="$1"
+  prm::load
+  del prm
+}
+
+load_gra() {
+  delete_drawable
+  new merge
+  merge::file="$1"
+}
+
+load_data() {
+  if [ ! "`object axis -instances`" ]; then
+    delete_drawable
+    load_ngraph_ngp
+  fi
+
+  if [ "`object file -instances`" ]; then
+    for i in `object file -instances`; do
+      put file:$i file="$1"
+    done
+  else
+    new file
+    put file file="$1"
+  fi
+  if [ "`object fit -instances`" ]; then
+    fit:0-!:equation=""
+  fi
+}
+
+do_load() {
+  case "$1" in
+  *.ngp|*.NGP)
+    load_ngp "$1"
+  ;;
+  *.prm|*.PRM)
+    load_prm "$1"
+  ;;
+  *.gra|*.GRA)
+    load_gra "$1"
+  ;;
+  *)
+    load_data "$1"
+  esac
+}
+
+output_viewer() {
+  gra:viewer:clear
+  gra:viewer:draw
+  gra:viewer:flush
+}
+
+output_printer() {
+  menu::print:"false 0"
+}
+
+output_ngp() {
+  echo "#!ngraph" > "$1"
+  echo "#%creator:" ${system:0:name} >> "$1"
+  echo "#%version:" ${system:0:version} >> "$1"
+  for drawable in `derive -instance draw`; do
+    get ${drawable}:0-! -id -field save >> "$1"
+  done
+  get gra:0 -id -field save >> "$1"
+}
+
+output_gra() {
+  new gra2file name=gra2file
+  gra2file::file="$1"
+  new gra
+  gra::device=gra2file:gra2file
+  gra::open
+  gra::draw
+  gra::flush
+  gra::close
+  del gra
+  del gra2file
+}
+
+output_eps() {
+  new gra2cairofile name=gra2cairofile
+  gra2cairofile::file="$1"
+  gra2cairofile::format="eps3"
+  new gra
+  gra::device=gra2cairofile:gra2cairofile
+  gra::open
+  gra::clear
+  gra::draw
+  gra::flush
+  gra::close
+  del gra
+  del gra2cairofile
+}
+
+output_metafile() {
+  new gra2cairofile name=gra2cairofile
+  gra2cairofile::file="$1"
+  gra2cairofile::format="emf"
+  new gra
+  gra::device=gra2cairofile:gra2cairofile
+  gra::open
+  gra::clear
+  gra::draw
+  gra::flush
+  gra::close
+  del gra
+  del gra2cairofile
+}
+
+do_action() {
+  if [ "$autoscale" = "y" ]; then
+    clear_axis 0-!
+  elif [ "$autoscale" != "n" ]; then
+    clear_axis $autoscale
+  fi
+  axis_auto_scale
+  output_viewer
+  target_file="$1"
+  case "$action" in
+  0)
+    sleep 1
+  ;;
+  1)
+    output_printer
+  ;;
+  2)
+    output_ngp "${target_file%.*}.ngp"
+  ;;
+  3)
+    output_gra "${target_file%.*}.gra"
+  ;;
+  4)
+    output_eps "${target_file%.*}.eps"
+  ;;
+  5)
+    output_metafile "${target_file%.*}.emf"
+  ;;
+  6)
+    . "$script"
+  ;;
+  7)
+    eval "$evalstr"
+  esac
+}
+
+load_parameter() {
+  if exist text:batch > /dev/null; then
+    put text:batch name:batch
+    set dummy ${text::text}
+    action=$2
+    autoscale=$3
+    if [ ! "$action" ]; then
+      action="2"
+    fi
+    if [ ! "$autoscale" ]; then
+      autoscale="n"
+    fi
+  fi
+  if exist text:batch_files > /dev/null; then
+    put text:batch_files name:batch_files
+    files="${text::text}"
+  fi
+  if exist text:batch_script > /dev/null; then
+    put text:batch_script name:batch_script
+    script="${text::text}"
+  fi
+  if exist text:batch_evalstr > /dev/null; then
+    put text:batch_evalstr name:batch_evalstr
+    evalstr="${text::text}"
+  fi
+}
+
+save_parameter() {
+  if exist text:batch > /dev/null; then
+    put text:batch name:batch
+  else
+    new text name:batch
+    text::hidden=true
+  fi
+  text::text="$action $autoscale n"
+  if exist text:batch_files > /dev/null; then
+    put text:batch_files name:batch_files
+  else
+    new text name:batch_files
+    text::hidden=true
+  fi
+  text::text="$files"
+  if exist text:batch_script > /dev/null; then
+    put text:batch_script name:batch_script
+  else
+    new text name:batch_script
+    text::hidden=true
+  fi
+  text::text="$script"
+  if exist text:batch_evalstr > /dev/null; then
+    put text:batch_evalstr name:batch_evalstr
+  else
+    new text name:batch_evalstr
+    text::hidden=true
+  fi
+  text::text="$evalstr"
+}
+
+init_counter() {
+  total="${sarray:filelist:num}"
+  serial=0
+}
+
+set_counter() {
+  serial=`iexpr "$serial+1"`
+  if [ "$serial" -eq 1 ]; then
+    first="true"
+  else
+    first=""
+  fi
+  if [ "$serial" -eq "$total" ]; then
+    last="true"
+  else
+    last=""
+  fi
+}
+
+set_filelist() {
+  if exist sarray:filelist > /dev/null; then
+    del sarray:filelist
+  fi
+  new sarray name:filelist
+  for i in $files; do
+    sarray:filelist:add:$i
+  done
+}
+
+#
+# main
+#
+
+load_parameter
+query_files
+query_action
+query_autoscale
+save_parameter
+set_filelist
+init_counter
+while [ "$serial" -lt "$total" ]; do
+  file="`get sarray:filelist -field get:$serial`"
+  if [ ! -f "$file" ]; then
+    break
+  fi
+  set_counter
+  do_load "$file"
+  do_action "$file"
+done
