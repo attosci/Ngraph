@@ -1,0 +1,36 @@
+IDs="0-!"
+
+load_parameter() {
+  if exist text:replace_files > /dev/null; then
+    put text:replace_files name:replace_files
+    IDs=${text::text}
+  fi
+}
+
+save_parameter() {
+  if exist text:replace_files > /dev/null; then
+    put text:replace_files name:replace_files
+  else
+    new text name:replace_files
+    text::hidden=true
+  fi
+  text::text="$IDs"
+}
+
+load_parameter
+
+new dialog
+dialog::title="File IDs"
+dialog::caption="File IDs"
+IDs=`get dialog -field input:"$IDs"`
+del dialog
+
+new dialog
+file=${dialog::get_open_file:'*'}
+del dialog
+
+if [ "$file" ]; then
+  eval "file:$IDs:file='$file'"
+fi
+
+save_parameter
