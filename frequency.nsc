@@ -1,0 +1,184 @@
+# frequency.nsc: make a frequency table
+# an addin file for Ngraph 6.06.06
+# version 0.4 on Descember 27, 2012 by attosci
+
+id=0
+data=1
+log=0
+min=0
+max=10
+step=1
+
+query_id() {
+  if [ `object file -instance` -eq 0 ] ; then
+    new dialog
+    dialog::beep
+    dialog::message "No data file."
+    del dialog
+    exit
+  fi
+  new dialog
+  dialog::caption="Select a data file"
+  dialog::select=$id
+  new sarray name=FILES
+  for i in `object file -instances`; do
+    sarray:FILES:push "`get file:$i -field id` | `get file:$i -field basename`"
+  done
+  FILE_OBJ=${dialog::combo:"sarray:FILES"}
+  set $FILE_OBJ
+  id=$1
+  del sarray:FILES
+  del dialog
+}
+
+query_data() {
+  new dialog
+  dialog::caption="Select target data"
+  dialog::select=$data
+  data=${dialog::radio:"x y"}
+  del dialog
+}
+
+query_log() {
+  new dialog
+  dialog::caption="Select scale"
+  dialog::select=$log
+  log=${dialog::radio:"Linear Log"}
+  del dialog
+}
+
+query_range() {
+  new dialog
+  dialog::caption="Min, max, step"
+  input=`get dialog -field input:"$min $max $step"`
+  del dialog
+  set dummy $input
+  case $# in
+  4)
+    min=$2
+    max=$3
+    step=$4
+  ;;
+  *)
+    new dialog
+    dialog::beep
+    dialog::message:"Invalid input: $input"
+    del dialog
+    exit
+  ;;
+  esac
+}
+
+query_savefile() {
+  new dialog
+  savefile=${dialog::get_save_file:'*'}
+  del dialog
+}
+
+load_parameter() {
+  if exist text:frequency > /dev/null; then
+    put text:frequency name:frequency
+    set dummy ${text::text}
+    id=$2
+    data=$3
+    log=$4
+    min=$5
+    max=$6
+    step=$7
+  fi
+}
+
+save_parameter() {
+  if exist text:frequency > /dev/null; then
+    put text:frequency name:frequency
+  else
+    new text name:frequency
+    text::hidden=true
+  fi
+  text::text="$id $data $log $min $max $step"
+}
+
+init_count() {
+  if [ $log -eq 1 ]; then
+    imax=`iexpr "gauss((log($max)-log($min))/log($step))"`
+  else
+    imax=`iexpr "gauss(($max-$min)/$step)"`
+  fi
+  i=0
+  while [ $i -lt $imax ]; do
+    iarray:count:add:0
+    i=`iexpr "$i+1"`
+  done
+}
+
+do_count() {
+  exe file:$id opendata
+  while exe file:$id getdata; do
+    if [ $data = "0" ]; then
+      stat=`get file:$id -field stat_x`
+      v=`get file:$id -field data_x`
+    else
+      stat=`get file:$id -field stat_y`
+      v=`get file:$id -field data_y`
+    fi
+    if [ "$stat" = "noerr" ]; then
+      if [ $log -eq 1 ]; then
+        i=`iexpr "gauss((log($v)-log($min))/log($step))"`
+      else
+        i=`iexpr "gauss(($v-$min)/$step)"`
+      fi
+      if [ \( $i -ge 0 \) -a \( $i -lt $imax \) ]; then
+        eval c='${'iarray:count:get:$i'}'
+        c=`iexpr "$c+1"`
+        iarray:count:put:$i $c
+       fi
+    fi
+  done
+  exe file:$id closedata
+}
+
+save_file() {
+  echo "# a frequency table created by frequency.nsc" > "$savefile"
+  echo "# ${system::date:0} ${system::time:0}" >> "$savefile"
+  echo "#" `get file:$id -field basename` >> "$savefile"
+  echo "# min: $min max: $max step: $step" >> "$savefile"
+  if [ $data = "0" ]; then
+    echo "# average:" `get file:$id -field davx` >> "$savefile"
+    echo "# sigma:  " `get file:$id -field dsigx` >> "$savefile"
+  else
+    echo "# average:" `get file:$id -field davy` >> "$savefile"
+    echo "# sigma:  " `get file:$id -field dsigy` >> "$savefile"
+  fi
+  i=0
+  while [ $i -lt $imax ]; do
+    if [ $log -eq 1 ]; then
+      v1=`dexpr "$min*$step^$i"`
+      v2=`dexpr "$min*$step^($i+0.5)"`
+      v3=`dexpr "$min*$step^($i+1.0)"`
+    else
+      v1=`dexpr "$min+$i*$step"`
+      v2=`dexpr "$min+($i+0.5)*$step"`
+      v3=`dexpr "$min+($i+1.0)*$step"`
+    fi
+    eval c='${'iarray:count:get:$i'}'
+    echo $v2 $c $v1 $v3 >> "$savefile"
+    i=`iexpr "$i+1"`
+  done
+}
+
+#
+# main
+#
+
+load_parameter
+query_id
+query_data
+query_log
+query_range
+query_savefile
+save_parameter
+new iarray name:count
+init_count
+do_count
+save_file
+del iarray:count
