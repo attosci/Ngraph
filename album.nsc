@@ -10,8 +10,8 @@ width=${gra::paper_width}
 height=${gra::paper_height}
 merge_width=$width
 merge_height=$height
-topmargin=1000
-bottommargin=1000
+topmargin=2000
+bottommargin=2000
 leftmargin=1000
 rightmargin=1000
 nx=4; ny=4; zoom=2500
