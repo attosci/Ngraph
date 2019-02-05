@@ -1,0 +1,715 @@
+# dxf.nsc: create a DXF file
+# an addin script for Ngraph 6.06 (ngraph-gtk)
+# version 0.2, August 28, 2014 by attosci
+
+layer="0"
+magnification=0.01
+X0=0
+Y0=30000
+R=0
+G=0
+B=0
+
+error_message() {
+  new dialog
+  dialog::beep
+  dialog::message:"$*"
+  del dialog
+  exit
+}
+
+query_file() {
+  new dialog
+  dialog::title="DXF file"
+  file=${dialog::get_save_file:'dxf'}
+  del dialog
+}
+
+query_layer() {
+  new dialog
+  dialog::title="Layer"
+  dialog::caption="Enter layer"
+  layer=`get dialog -field input:"$layer"`
+  del dialog
+}
+
+query_origin() {
+  query="Origin for DXF (default: $X0 $Y0)"
+  new dialog
+  dialog::title="Origin for DXF"
+  dialog::caption="Enter origin (X Y) for DXF"
+  input=`get dialog -field input:"$X0 $Y0"`
+  del dialog
+  set $input
+  if [ $# -eq 2 ]
+  then
+    X0=$1
+    Y0=$2
+  else
+    error_message "query_origin: invalid number of inputs"
+  fi
+}
+
+query_magnification() {
+  new dialog
+  dialog::title="Magnification"
+  dialog::caption="Enter magnification"
+  magnification=`get dialog -field input:"$magnification"`
+  del dialog
+  if [ $# -ne 0 ]
+  then
+    error_message "query_magnification: invalid number of inputs"
+  fi
+}
+
+query_RGB() {
+  new dialog
+  dialog::title="Target RGB"
+  dialog::caption="Enter target R G B"
+  input=`get dialog -field input:"$R $G $B"`
+  del dialog
+  set $input
+  if [ $# -eq 3 ]
+  then
+    R=$1
+    G=$2
+    B=$3
+  else
+    error_message "query_RGB: invalid number of inputs"
+  fi
+}
+
+erase_duplicated_points() {
+  if [ $# -lt 4 ]
+  then
+    error_message "erase_duplicated_points: few points in $object"
+  fi
+  p="$1 $2"
+  x=$1
+  y=$2
+  shift 2
+  while [ $# -ge 2 ]
+  do
+    if [ \( $1 -ne $x \) -o \( $2 -ne $y \) ]
+    then
+      p="$p $1 $2"
+    fi
+    x=$1
+    y=$2
+    shift 2
+  done
+  echo $p
+}
+
+style_type() {
+  style=`get $1 -field style`
+  if [ "$style" = "" ]
+  then
+    echo "CONTINUOUS"
+  elif [ "$style" = "100 100" ]
+  then
+    echo "DOT"
+  elif [ "$style" = "150 150" ]
+  then
+    echo "DASHED2"
+  elif [ "$style" = "450 150" ]
+  then
+    echo "DASHED3"
+  elif [ "$style" = "450 150 150 150" ]
+  then
+    echo "CENTER1"
+  elif [ "$style" = "450 150 150 150 150 150" ]
+  then
+    echo "PHANTOM1"
+  elif [ "$style" = "450 150 450 150 150 150" ]
+  then
+    echo "BORDER"
+  else
+    error_message "style_type: invalid type in $1"
+  fi
+}
+
+selected() {
+  if [ "`get $1 -field hidden`" = "true" ]
+  then
+    echo "false"
+    return
+  fi
+  R1=`get $1 -field stroke_R`
+  G1=`get $1 -field stroke_G`
+  B1=`get $1 -field stroke_B`
+  if [ \( $R1 -ne $R \) -o \( $G1 -ne $G \) -o \( $B1 -ne $B \) ] 
+  then
+    echo "false"
+    return
+  fi
+  echo "true"
+}
+
+load_parameters() {
+  if exist text:dxf >/dev/null
+  then
+    put text:dxf name:dxf
+    set ${text::text}
+    layer=$1
+    X0=$2
+    Y0=$3
+    magnification=$4
+    R=$5
+    G=$6
+    B=$7
+  else
+    new text name:dxf
+    text::hidden=true
+    text::text="$layer $X0 $Y0 $magnification $R $G $B"
+  fi
+}
+
+save_parameters() {
+  if exist text:dxf >/dev/null
+  then
+    put text:dxf name:dxf
+  else
+    new text name:dxf
+    text::hidden=true
+  fi
+  text::text="$layer $X0 $Y0 $magnification $R $G $B"
+}
+
+do_mark() {
+  for i in `object mark -instances`
+  do
+    object="mark:$i"
+    if [ "`selected $object`" = "false" ]
+    then 
+      continue
+    fi
+    x=`get $object -field x`
+    x=`dexpr "$magnification*($x-$X0)"`
+    x=`get text:dxf -field printf:"%f $x"`
+    y=`get $object -field y`
+    y=`dexpr "$magnification*($Y0-$y)"`
+    y=`get text:dxf -field printf:"%f $y"`
+    echo "  0"
+    echo "POINT"
+    echo "  8"
+    echo "$layer"
+    echo "  62"
+    echo "0"
+    echo "  10"
+    echo "$x"
+    echo "  20"
+    echo "$y"
+  done
+}
+
+do_text() {
+  for i in `object text -instances`
+  do
+    object="text:$i"
+    if [ "`selected $object`" = "false" ]
+    then 
+      continue
+    fi
+    x=`get $object -field x`
+    x=`dexpr "$magnification*($x-$X0)"`
+    x=`get text:dxf -field printf:"%f $x"`
+    y=`get $object -field y`
+    y=`dexpr "$magnification*($Y0-$y)"`
+    y=`get text:dxf -field printf:"%f $y"`
+    pt=`get $object -field pt`
+    pt=`dexpr "0.3*$magnification*$pt"`
+    pt=`get text:dxf -field printf:"%f $pt"`
+    text=`get $object -field text`
+    direction=`get $object -field direction`
+    direction=`dexpr "0.01*$direction"`
+    direction=`get text:dxf -field printf:"%f $direction"`
+    echo "  0"
+    echo "TEXT"
+    echo "  8"
+    echo "$layer"
+    echo "  62"
+    echo "0"
+    echo "  10"
+    echo "$x"
+    echo "  20"
+    echo "$y"
+    echo "  40"
+    echo "$pt"
+    echo "  1"
+    echo "$text"
+    echo "  50"
+    echo "$direction"
+    echo "  41"
+    echo "1.0"
+  done
+}
+
+do_arc() {
+  for i in `object arc -instances`
+  do
+    object="arc:$i"
+    if [ "`selected $object`" = "false" ]
+    then 
+      continue
+    fi
+    type=`style_type $object`
+    x=`get $object -field x`
+    x=`dexpr "$magnification*($x-$X0)"`
+    x=`get text:dxf -field printf:"%f $x"`
+    y=`get $object -field y`
+    y=`dexpr "$magnification*($Y0-$y)"`
+    y=`get text:dxf -field printf:"%f $y"`
+    rx=`get $object -field rx`
+    ry=`get $object -field ry`
+    r=`dexpr "$magnification*($rx+$ry)/2.0"`
+    r=`get text:dxf -field printf:"%f $r"`
+    angle1=`get $object -field angle1`
+    angle1=`dexpr "0.01*$angle1"`
+    angle1=`get text:dxf -field printf:"%f $angle1"`
+    angle2=`get $object -field angle2`
+    angle2=`dexpr "$angle1+0.01*$angle2"`
+    angle2=`get text:dxf -field printf:"%f $angle2"`
+    echo "  0"
+    echo "ARC"
+    echo "  8"
+    echo "$layer"
+    echo "  6"
+    echo "$type"
+    echo "  62"
+    echo "0"
+    echo "  10"
+    echo "$x"
+    echo "  20"
+    echo "$y"
+    echo "  40"
+    echo "$r"
+    echo "  50"
+    echo "$angle1"
+    echo "  51"
+    echo "$angle2"
+  done
+}
+
+do_rectangle() {
+  for i in `object rectangle -instances`
+  do
+    object="rectangle:$i"
+    if [ "`selected $object`" = "false" ]
+    then 
+      continue
+    fi
+    type=`style_type $object`
+    x1=`get $object -field x1`
+    x1=`dexpr "$magnification*($x1-$X0)"`
+    x1=`get text:dxf -field printf:"%f $x1"`
+    y1=`get $object -field y1`
+    y1=`dexpr "$magnification*($Y0-$y1)"`
+    y1=`get text:dxf -field printf:"%f $y1"`
+    x2=`get $object -field x2`
+    x2=`dexpr "$magnification*($x2-$X0)"`
+    x2=`get text:dxf -field printf:"%f $x2"`
+    y2=`get $object -field y2`
+    y2=`dexpr "$magnification*($Y0-$y2)"`
+    y2=`get text:dxf -field printf:"%f $y2"`
+    echo "  0"
+    echo "LINE"
+    echo "  8"
+    echo "$layer"
+    echo "  6"
+    echo "$type"
+    echo "  62"
+    echo "0"
+    echo "  10"
+    echo "$x1"
+    echo "  20"
+    echo "$y1"
+    echo "  11"
+    echo "$x2"
+    echo "  21"
+    echo "$y1"
+    echo "  0"
+    echo "LINE"
+    echo "  8"
+    echo "$layer"
+    echo "  6"
+    echo "$type"
+    echo "  62"
+    echo "0"
+    echo "  10"
+    echo "$x2"
+    echo "  20"
+    echo "$y1"
+    echo "  11"
+    echo "$x2"
+    echo "  21"
+    echo "$y2"
+    echo "  0"
+    echo "LINE"
+    echo "  8"
+    echo "$layer"
+    echo "  6"
+    echo "$type"
+    echo "  62"
+    echo "0"
+    echo "  10"
+    echo "$x2"
+    echo "  20"
+    echo "$y2"
+    echo "  11"
+    echo "$x1"
+    echo "  21"
+    echo "$y2"
+    echo "  0"
+    echo "LINE"
+    echo "  8"
+    echo "$layer"
+    echo "  6"
+    echo "$type"
+    echo "  62"
+    echo "0"
+    echo "  10"
+    echo "$x1"
+    echo "  20"
+    echo "$y2"
+    echo "  11"
+    echo "$x1"
+    echo "  21"
+    echo "$y1"
+  done
+}
+
+do_polygon() {
+  for i in `object polygon -instances`
+  do
+    object="polygon:$i"
+    if [ "`selected $object`" = "false" ]
+    then 
+      continue
+    fi
+    type=`style_type $object`
+    points="`get $object -field points`"
+    points="`erase_duplicated_points $points`"
+    set $points
+    points="$points $1 $2"
+    set $points
+    x1=`dexpr "$magnification*($1-$X0)"`
+    x1=`get text:dxf -field printf:"%f $x1"`
+    y1=`dexpr "$magnification*($Y0-$2)"`
+    y1=`get text:dxf -field printf:"%f $y1"`
+    shift 2
+    while [ $# -gt 0 ]
+    do
+      x2=`dexpr "$magnification*($1-$X0)"`
+      x2=`get text:dxf -field printf:"%f $x2"`
+      y2=`dexpr "$magnification*($Y0-$2)"`
+      y2=`get text:dxf -field printf:"%f $y2"`
+      echo "  0"
+      echo "LINE"
+      echo "  8"
+      echo "$layer"
+      echo "  6"
+      echo "$type"
+      echo "  62"
+      echo "0"
+      echo "  10"
+      echo "$x1"
+      echo "  20"
+      echo "$y1"
+      echo "  11"
+      echo "$x2"
+      echo "  21"
+      echo "$y2"
+      x1=$x2
+      y1=$y2
+      shift 2
+    done
+  done
+}
+
+do_line() {
+  for i in `object line -instances`
+  do
+    object="line:$i"
+    if [ "`selected $object`" = "false" ]
+    then 
+      continue
+    fi
+    type=`style_type $object`
+    points="`get $object -field points`"
+    points="`erase_duplicated_points $points`"
+    set $points
+    x1=`dexpr "$magnification*($1-$X0)"`
+    x1=`get text:dxf -field printf:"%f $x1"`
+    y1=`dexpr "$magnification*($Y0-$2)"`
+    y1=`get text:dxf -field printf:"%f $y1"`
+    shift 2
+    while [ $# -gt 0 ]
+    do
+      x2=`dexpr "$magnification*($1-$X0)"`
+      x2=`get text:dxf -field printf:"%f $x2"`
+      y2=`dexpr "$magnification*($Y0-$2)"`
+      y2=`get text:dxf -field printf:"%f $y2"`
+      echo "  0"
+      echo "LINE"
+      echo "  8"
+      echo "$layer"
+      echo "  6"
+      echo "$type"
+      echo "  62"
+      echo "0"
+      echo "  10"
+      echo "$x1"
+      echo "  20"
+      echo "$y1"
+      echo "  11"
+      echo "$x2"
+      echo "  21"
+      echo "$y2"
+      x1=$x2
+      y1=$y2
+      shift 2
+    done
+  done
+}
+
+do_header() {
+  echo '  0'
+  echo 'SECTION'
+  echo '  2'
+  echo 'HEADER'
+  echo '  9'
+  echo '$ACADVER'
+  echo '  1'
+  echo 'AC1009'
+  echo '  9'
+  echo '$INSBASE'
+  echo '  10'
+  echo '0.0'
+  echo '  20'
+  echo '0.0'
+  echo '  30'
+  echo '0.0'
+  echo '  9'
+  echo '$EXTMIN'
+  echo '  10'
+  echo '0.0'
+  echo '  20'
+  echo '0.0'
+  echo '  9'
+  echo '$EXTMAX'
+  echo '  10'
+  echo '200.0'
+  echo '  20'
+  echo '300.0'
+  echo '  9'
+  echo '$LIMMIN'
+  echo '  10'
+  echo '0.0'
+  echo '  20'
+  echo '0.0'
+  echo '  9'
+  echo '$LIMMAX'
+  echo '  10'
+  echo '200.0'
+  echo '  20'
+  echo '300.0'
+  echo '  0'
+  echo 'ENDSEC'
+
+  echo '  0'
+  echo 'SECTION'
+  echo '  2'
+  echo 'TABLES'
+  echo '  0'
+  echo 'TABLE'
+  echo '  2'
+  echo 'LTYPE'
+  echo '  70'
+  echo '7'
+  echo '  0'
+  echo 'LTYPE'
+  echo '  2'
+  echo 'CONTINUOUS'
+  echo '  70'
+  echo '64'
+  echo '  3'
+  echo 'Solid_Line'
+  echo '  72'
+  echo '65'
+  echo '  73'
+  echo '0'
+  echo '  40'
+  echo '0.0'
+  echo '  0'
+  echo 'LTYPE'
+  echo '  2'
+  echo 'DASHED2'
+  echo '  70'
+  echo '64'
+  echo '  3'
+  echo '----    ----    ----    ----    '
+  echo '  72'
+  echo '65'
+  echo '  73'
+  echo '2'
+  echo '  40'
+  echo '5.0'
+  echo '  49'
+  echo '2.5'
+  echo '  49'
+  echo '-2.5'
+  echo '  0'
+  echo 'LTYPE'
+  echo '  2'
+  echo 'DASHED3'
+  echo '  70'
+  echo '64'
+  echo '  3'
+  echo '------  ------  ------  ------  '
+  echo '  72'
+  echo '65'
+  echo '  73'
+  echo '2'
+  echo '  40'
+  echo '5.0'
+  echo '  49'
+  echo '3.75'
+  echo '  49'
+  echo '-1.25'
+  echo '  0'
+  echo 'LTYPE'
+  echo '  2'
+  echo 'CENTER1'
+  echo '  70'
+  echo '64'
+  echo '  3'
+  echo '----- - ----- - ----- - ----- - '
+  echo '  72'
+  echo '65'
+  echo '  73'
+  echo '4'
+  echo '  40'
+  echo '10.0'
+  echo '  49'
+  echo '6.25'
+  echo '  49'
+  echo '-1.25'
+  echo '  49'
+  echo '1.25'
+  echo '  49'
+  echo '-1.25'
+  echo '  0'
+  echo 'LTYPE'
+  echo '  2'
+  echo 'DOT'
+  echo '  70'
+  echo '64'
+  echo '  3'
+  echo '-   -   -   -   -   -   -   -   '
+  echo '  72'
+  echo '65'
+  echo '  73'
+  echo '2'
+  echo '  40'
+  echo '2.5'
+  echo '  49'
+  echo '0.625'
+  echo '  49'
+  echo '-1.875'
+  echo '  0'
+  echo 'LTYPE'
+  echo '  2'
+  echo 'PHANTOM1'
+  echo '  70'
+  echo '64'
+  echo '  3'
+  echo '--- - - --- - - --- - - --- - - '
+  echo '  72'
+  echo '65'
+  echo '  73'
+  echo '6'
+  echo '  40'
+  echo '10.0'
+  echo '  49'
+  echo '3.25'
+  echo '  49'
+  echo '-1.25'
+  echo '  49'
+  echo '1.25'
+  echo '  49'
+  echo '-1.25'
+  echo '  49'
+  echo '1.25'
+  echo '  49'
+  echo '-1.25'
+  echo '  0'
+  echo 'LTYPE'
+  echo '  2'
+  echo 'BORDER'
+  echo '  70'
+  echo '64'
+  echo '  3'
+  echo '--- --- - --- --- - --- --- - '
+  echo '  72'
+  echo '65'
+  echo '  73'
+  echo '6'
+  echo '  40'
+  echo '11.5'
+  echo '  49'
+  echo '3.25'
+  echo '  49'
+  echo '-1.25'
+  echo '  49'
+  echo '3.25'
+  echo '  49'
+  echo '-1.25'
+  echo '  49'
+  echo '1.25'
+  echo '  49'
+  echo '-1.25'
+  echo '  0'
+  echo 'ENDTAB'
+  echo '  0'
+  echo 'ENDSEC'
+
+  echo '  0'
+  echo 'SECTION'
+  echo '  2'
+  echo 'ENTITIES'
+}
+
+do_footer() {
+  echo '  0'
+  echo 'ENDSEC'
+  echo '  0'
+  echo 'EOF'
+}
+
+display_results() {
+  new dialog
+  dialog::message:"Objects were successfully written to $file."
+  del dialog
+}
+
+#
+# Main
+# 
+
+load_parameters
+query_file
+query_layer
+query_origin
+query_magnification
+query_RGB
+do_header > $file
+do_mark >> $file
+do_text >> $file
+do_arc >> $file
+do_rectangle >> $file
+do_polygon >> $file
+do_line >> $file
+do_footer >> $file
+save_parameters
+display_results
