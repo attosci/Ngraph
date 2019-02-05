@@ -1,0 +1,378 @@
+# JEOL01: create a JEOL01 format file
+# an addin script for Ngraph 6.3
+# Version 0.1.2, May 19, 2005 by Fumiyuki Nihey
+
+idname="PATTERN"
+XO=0
+YO=0
+R=0
+G=0
+B=255
+
+error_message() {
+  new dialog
+  dialog::message:"$*"
+  del dialog
+  exit
+}
+
+query_file() {
+  new dialog
+  file=${dialog::get_save_file:'JEOL01(*.j01) *.j01'}
+  del dialog
+}
+
+query_idname() {
+  query="ID for J01(default: $idname)"
+  new dialog
+  input=`get dialog -field input:"$query"`
+  del dialog
+  if [ "$input" != "" ]
+  then
+    idname=$input
+  fi
+}
+
+query_origin() {
+  query="Origin for J01 (default: $XO $YO)"
+  new dialog
+  input=`get dialog -field input:"$query"`
+  del dialog
+  set $input
+  if [ $# -eq 2 ]
+  then
+    XO=$1
+    YO=$2
+  elif [ $# -ne 0 ]
+  then
+    error_message "query_origin: invalid number of inputs"
+  fi
+}
+
+query_RGB() {
+  query="Target R G B (default: $R $G $B)"
+  new dialog
+  input=`get dialog -field input:"$query"`
+  del dialog
+  set $input
+  if [ $# -eq 3 ]
+  then
+    R=$1
+    G=$2
+    B=$3
+  elif [ $# -ne 0 ]
+  then
+    error_message "query_RGB: invalid number of inputs"
+  fi
+}
+
+erase_duplicated_points() {
+  if [ $# -lt 4 ]
+  then
+    error_message "erase_duplicated_points: few points in $object"
+  fi
+  p="$1 $2"
+  x=$1
+  y=$2
+  shift 2
+  while [ $# -ge 2 ]
+  do
+    if [ \( $1 -ne $x \) -o \( $2 -ne $y \) ]
+    then
+      p="$p $1 $2"
+    fi
+    x=$1
+    y=$2
+    shift 2
+  done
+  echo $p
+}
+
+rotation() {
+  if [ $# -lt 6 ]
+  then
+    error_message "rotation: few points in $object"
+  fi
+  x0=$1
+  y0=$2
+  x1=$3
+  y1=$4
+  th=0
+  while [ $# -ge 2 ]
+  do
+    case $# in
+      2)
+        ax=`iexpr "$x0-$1"`
+        ay=`iexpr "$y0-$2"`
+        bx=`iexpr "$x1-$x0"`
+        by=`iexpr "$y1-$y0"`
+      ;;
+      4)
+        ax=`iexpr "$3-$1"`
+        ay=`iexpr "$4-$2"`
+        bx=`iexpr "$x0-$3"`
+        by=`iexpr "$y0-$4"`
+      ;;
+      *)
+        ax=`iexpr "$3-$1"`
+        ay=`iexpr "$4-$2"`
+        bx=`iexpr "$5-$3"`
+        by=`iexpr "$6-$4"`
+      ;;
+    esac
+    t=`angle $ax $ay $bx $by`
+    th=`dexpr "$th+$t"`
+    shift 2
+  done
+  echo $th
+}
+
+angle() {
+  a=`dexpr "sqrt($1*$1+$2*$2)"`
+  b=`dexpr "sqrt($3*$3+$4*$4)"`
+  s=`dexpr "($1*$4-$2*$3)/($a*$b)"`
+  c=`dexpr "($1*$3+$2*$4)/($a*$b)"`
+  if [ `iexpr "ge($s,0)"` -eq 1 ]
+  then
+    echo `dexpr "acos($c)"`
+  else
+    echo `dexpr "-acos($c)"`
+  fi
+}
+
+reverse_points() {
+  p=""
+  while [ $# -ge 2 ]
+  do
+    p="$1 $2 $p"
+    shift 2
+  done
+  echo $p
+}
+
+shift_points() {
+  p=""
+  while [ $# -ge 2 ]
+  do
+    x=`iexpr "$1-$XO"`
+    y=`iexpr "$2-$YO"`
+    p="$p $x $y"
+    shift 2
+  done
+  echo $p
+}
+
+style_type() {
+  style=`get $1 -field style`
+  if [ "$style" = "" ]
+  then
+    echo 0
+  elif [ "$style" = "100 100" ]
+  then
+    echo 1
+  elif [ "$style" = "150 150" ]
+  then
+    echo 2
+  elif [ "$style" = "450 150" ]
+  then
+    echo 3
+  elif [ "$style" = "450 150 150 150" ]
+  then
+    echo 4
+  elif [ "$style" = "450 150 150 150 150 150" ]
+  then
+    echo 5
+  elif [ "$style" = "450 150 450 150 150 150" ]
+  then
+    echo 6
+  else
+    error_message "type: invalid type in $1"
+  fi
+}
+
+selected() {
+  if [ "`get $1 -field hidden`" = "true" ]
+  then
+    echo "false"
+    return
+  fi
+  R1=`get $1 -field R`
+  G1=`get $1 -field G`
+  B1=`get $1 -field B`
+  if [ \( $R1 -ne $R \) -o \( $G1 -ne $G \) -o \( $B1 -ne $B \) ] 
+  then
+    echo "false"
+    return
+  fi
+  echo "true"
+}
+
+reset_boundary() {
+  xmin=65000
+  xmax=-65000
+  ymin=65000
+  ymax=-65000
+}
+
+set_boundary() {
+  while [ $# -ge 2 ]
+  do
+    xmin=`iexpr "min($xmin,$1)"`    
+    xmax=`iexpr "max($xmax,$1)"`    
+    ymin=`iexpr "min($ymin,$2)"`    
+    ymax=`iexpr "max($ymax,$2)"`    
+    shift 2
+  done
+}
+
+load_parameters() {
+  if exist text:jeol01 >/dev/null
+  then
+    put text:jeol01 name:jeol01
+    set ${text::text}
+    idname=$1
+    XO=$2
+    YO=$3
+    R=$4
+    G=$5
+    B=$6
+  fi
+}
+
+save_parameters() {
+  if exist text:jeol01 >/dev/null
+  then
+    put text:jeol01 name:jeol01
+  else
+    new text name:jeol01
+    text::hidden=true
+  fi
+  text::text="$idname $XO $YO $R $G $B"
+}
+
+display_results() {
+  new dialog
+  dialog::message:"$idname in ($xmin,$ymin)-($xmax,$ymax)
+with $nrectangle rectangle(s), $npolygon polygon(s), and $nline line(s)
+was written as $file normally."
+  del dialog
+}
+
+do_rectangles() {
+  nrectangle=0
+  for i in `object rectangle -instances`
+  do
+    object="rectangle:$i"
+    if [ "`selected $object`" = "false" ]
+    then 
+      continue
+    fi
+    type=`style_type $object`
+    x1=`get $object -field x1`
+    y1=`get $object -field y1`
+    x2=`get $object -field x2`
+    y2=`get $object -field y2`
+    x0=`iexpr "min($x1,$x2)-$XO"`
+    xl=`iexpr "abs($x1-$x2)"`
+    y0=`iexpr "min($y1,$y2)-$YO"`
+    yl=`iexpr "abs($y1-$y2)"`
+    echo "RT/$type $x0,$y0,$xl,$yl"
+    set_boundary $x0 $y0 `iexpr "$x0+$xl"` `iexpr "$y0+$yl"`
+    nrectangle=`iexpr "$nrectangle+1"`
+  done
+}
+
+do_polygons() {
+  npolygon=0
+  for i in `object polygon -instances`
+  do
+    object="polygon:$i"
+    if [ "`selected $object`" = "false" ]
+    then 
+      continue
+    fi
+    type=`style_type $object`
+    points="`get $object -field points`"
+    points="`shift_points $points`"
+    points="`erase_duplicated_points $points`"
+    r=`rotation $points`
+    if [ `iexpr "lt($r,0)"` -eq 1 ]
+    then 
+      points="`reverse_points $points`"
+    fi
+    set_boundary $points
+    set $points
+    line="TK/$type $1,$2"
+    count=1
+    shift 2
+    while [ $# -gt 0 ]
+    do
+      if [ $count -ge 6 ]
+      then
+        echo "$line\$"
+        line="$1,$2"
+        count=1
+      else
+        line="$line-$1,$2"
+        count=`iexpr "$count+1"`
+      fi
+      shift 2
+    done
+    echo $line
+    npolygon=`iexpr "$npolygon+1"`
+  done
+}
+
+do_lines() {
+  nline=0
+  for i in `object line -instances`
+  do
+    object="line:$i"
+    if [ "`selected $object`" = "false" ]
+    then 
+      continue
+    fi
+    type=`style_type $object`
+    points="`get $object -field points`"
+    points="`shift_points $points`"
+    points="`erase_duplicated_points $points`"
+    set_boundary $points
+    set $points
+    line="LN/$type $1,$2"
+    count=1
+    shift 2
+    while [ $# -gt 0 ]
+    do
+      if [ $count -ge 6 ]
+      then
+        echo "$line\$"
+        line="$1,$2"
+        count=1
+      else
+        line="$line-$1,$2"
+        count=`iexpr "$count+1"`
+      fi
+      shift 2
+    done
+    echo $line
+    nline=`iexpr "$nline+1"`
+  done
+}
+
+#
+# Main
+# 
+
+load_parameters
+query_file
+query_idname
+query_origin
+query_RGB
+reset_boundary
+echo "ID/$idname" > $file
+do_rectangles >> $file
+do_polygons >> $file
+do_lines >> $file
+echo "EF" >> $file
+save_parameters
+display_results
