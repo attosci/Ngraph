@@ -1,6 +1,6 @@
 # JEOL01: create a JEOL01 format file
 # an addin script for Ngraph 6.3
-# Version 0.1.2, May 19, 2005 by Fumiyuki Nihey
+# Version 0.1.2, May 19, 2005 by attosci 
 
 idname="PATTERN"
 XO=0
