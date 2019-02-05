@@ -18,3 +18,11 @@ Make a histogram.
 
 Simultaneously replace the file name of multiple data.
 
+## dxf.nsc
+
+Export data as DXF file.
+
+## jeol01.nsc
+
+Exportdata as JEOL01 file.
+
