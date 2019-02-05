@@ -10,3 +10,11 @@ Plot multiple graph in a sheet.
 
 Apply a short scripts to existing data in a directory.
 
+## frequency.nsc
+
+Make a histogram.
+
+## replace_files.nsc
+
+Simultaneously replace the file name of multiple data.
+
