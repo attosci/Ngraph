@@ -1,0 +1,663 @@
+# points.nsc: manipulate points in an object
+# version 0.5 on February 6, 2019 by attosci
+
+object=polygon # default polygon
+id=0           # default id
+dx=1000        # for move
+dy=1000        # for move
+th=9000        # for rotate
+rx=10000       # for magnify
+ry=10000       # for magnify
+
+# read object and id from points_object
+if exist text:points_object >/dev/null
+then
+  put text:points_object name:points_object
+  new sarray
+  sarray::@=${text::text}
+  if [ ${sarray::num} -eq 2 ]
+  then
+    object=${sarray::get:0}
+    id=${sarray::get:1}
+  fi
+  del sarray
+fi
+
+# get object and id
+new dialog
+dialog::caption="object:(l)ine/(c)urve/(p)olygon and id"
+input=`get dialog -field input:"$object $id"`
+del dialog
+set dummy $input
+case $# in
+3)
+  object=$2
+  id=$3
+;;
+*)
+  new dialog
+  dialog::message:'invalid inputs'
+  del dialog
+  exit
+;;
+esac
+case "$object" in
+l*|L*)
+  object="line"
+;;
+c*|C*)
+  object="curve"
+;;
+p*|P)
+  object="polygon"
+;;
+*)
+  new dialog
+  dialog::message:'invalid object'
+  del dialog
+  exit
+;;
+esac
+
+# get points
+if exist $object:$id >/dev/null
+then
+  points_in=`get $object:$id -field points`
+else
+  new dialog
+  dialog::message:'no object'
+  del dialog
+  exit
+fi
+
+# get object center
+new iarray
+iarray::@=`get $object:$i -field bbox`
+xc=`iexpr "0.5*(${iarray::get:0}+${iarray::get:2})"`
+yc=`iexpr "0.5*(${iarray::get:1}+${iarray::get:3})"`
+del iarray
+
+# write object and id to text:points_object
+if exist text:points_object >/dev/null
+then
+  put text:points_object name:points_object
+else
+  new text name:points_object
+  text::hidden=true
+fi
+text::text="$object $id"
+
+# select a command
+new dialog
+dialog::caption="a)dd,dD)elete,mM)ove,rR)otate,hH)orisontal_flip,vV)ertical_flip,ma(gG)nify,uU)ndo"
+command=`get dialog -field input:""`
+del dialog
+
+# get parameters
+case "$command" in
+m*|M*)
+  # get dx and dy
+  new dialog
+  dialog::caption="Direction (dx dy) in unit of 0.01 mm"
+  input=`get dialog -field input:"$dx $dy"`
+  del dialog
+  set dummy $input
+  case $# in
+  3)
+    dx=$2
+    dy=$3
+  ;;
+  *)
+    new dialog
+    dialog::message:'Invalid inputs'
+    del dialog
+    exit
+  ;;
+  esac             
+;;
+r*|R*)
+  # get th
+  new dialog
+  dialog::caption="Angle in unit of 0.01 degree"
+  th=`get dialog -field input:"$th"`
+  del dialog
+  ct=`dexpr "cos(pi*$th/1.8e4)"`
+  st=`dexpr "sin(pi*$th/1.8e4)"`
+;;
+g*|G*)
+  # get rx and ry
+  new dialog
+  dialog::caption="Magnification ratio (rx ry) in unit of 0.01%"
+  new dialog
+  input=`get dialog -field input:"$rx $ry"`
+  del dialog
+  set dummy $input
+  case $# in
+  2)
+    rx=$2
+    ry=$rx
+  ;;
+  3)
+    rx=$2
+    ry=$3
+  ;;
+  *)
+    new dialog
+    dialog::message:'Invalid inputs'
+    del dialog
+    exit
+  ;;
+  esac             
+;;
+esac
+
+# check a mark and get its position
+case "$command" in
+a*|R*|G*|H*|V*)
+  if exist mark >/dev/null
+  then
+    xm=${mark::x}
+    ym=${mark::y}
+    del mark
+  else
+    new dialog
+    dialog::message:'Define a point by a mark'
+    del dialog
+    exit
+  fi
+;;
+esac
+
+# check a rectangle and get its position
+case "$command" in
+D*|M*|R*|G*|H*|V*)
+  if exist rectangle >/dev/null
+  then
+    x1=${rectangle::x1}
+    y1=${rectangle::y1}
+    x2=${rectangle::x2}
+    y2=${rectangle::y2}
+    del rectangle
+  else
+    new dialog
+    dialog::message:'Define a region by a rectangle'
+    del dialog
+    exit
+  fi
+;;
+esac
+
+###############################################################
+# execute a command
+case "$command" in
+
+  #############################################################
+  d*) # delete all points
+  #############################################################
+
+    points_out=""
+
+  ;;
+
+  #############################################################
+  D*) # delete points enclosed by the rectangle
+  #############################################################
+
+    # write points
+    points_out=""
+    j=0
+    for i in $points_in
+    do
+      if [ $j -eq 0 ]
+      then
+        x=$i
+      else
+        y=$i
+        ax=`iexpr "($x-$x1)*($x-$x2)"`
+        ay=`iexpr "($y-$y1)*($y-$y2)"`
+        if [ \( $ax -gt 0 \) -o \( $ay -gt 0 \) ]
+        then
+          points_out="$points_out $x $y"
+        fi
+      fi
+      j=`iexpr "1-$j"`
+    done
+
+  ;;
+
+  #############################################################
+  a*) # add a point into the nearest segment
+  #############################################################
+
+    # get the last point as (xx,yy)
+    j=0
+    for i in $points_in
+    do
+      if [ $j -eq 0 ]
+      then
+        xx=$i
+      else
+        yy=$i
+      fi
+      j=`iexpr "1-$j"`
+    done
+
+    # find the nearest segment
+    dmin=10000
+    nmin=-1
+    n=0
+    j=0
+    for i in $points_in
+    do
+      if [ $j -eq 0 ]
+      then
+        x=$i
+      else
+        y=$i
+        if [ \( $x -ne $xx \) -o \( $y -ne $yy \) ]
+        then
+          ax=`iexpr "$x-$xx"`
+          ay=`iexpr "$y-$yy"`
+          bx=`iexpr "$xm-$xx"`
+          by=`iexpr "$ym-$yy"`
+          t=`iexpr "(1.0e4*($ax*$bx+$ay*$by))/($ax*$ax+$ay*$ay)"`
+          if [ $t -lt 0 ]
+          then
+            d=`iexpr "sqrt(sqr($bx)+sqr($by))"`
+            if [ $d -lt $dmin ]
+            then
+              dmin=$d
+              nmin=-1
+            fi
+          elif [ $t -gt 10000 ]
+          then
+            d=`iexpr "sqrt(sqr($bx-$ax)+sqr($by-$ay))"`
+            if [ $d -lt $dmin ]
+            then
+              dmin=$d
+              nmin=-1
+            fi
+          else
+            d=`iexpr "sqrt(sqr($bx-($t/1.0e4)*$ax)+sqr($by-($t/1.0e4)*$ay))"`
+            if [ $d -lt $dmin ]
+            then
+              dmin=$d
+              nmin=$n
+            fi
+          fi
+        fi
+        xx=$x
+        yy=$y
+        n=`iexpr "$n+1"`        
+      fi
+      j=`iexpr "1-$j"`
+    done
+
+    # write points
+    points_out=""
+    n=0
+    j=0
+    for i in $points_in
+    do
+      if [ $j -eq 0 ]
+      then
+        x=$i
+      else
+        y=$i
+        if [ $n -eq $nmin ]
+        then
+          points_out="$points_out $xm $ym"
+        fi
+        points_out="$points_out $x $y"
+        n=`iexpr "$n+1"`
+      fi
+      j=`iexpr "1-$j"`
+    done
+    if [ $n -eq $nmin ]
+    then
+      points_out="$points_out $xm $ym"
+    fi
+
+  ;;
+
+  #############################################################
+  m*) # move all points
+  #############################################################
+
+    # write points
+    points_out=""
+    j=0
+    for i in $points_in
+    do
+      if [ $j -eq 0 ]
+      then
+        x=$i
+      else
+        y=$i
+        x=`iexpr "$x+$dx"`
+        y=`iexpr "$y+$dy"`
+        points_out="$points_out $x $y"
+      fi
+      j=`iexpr "1-$j"`
+    done
+
+  ;;
+
+  #############################################################
+  M*) # move points enclosed by the rectangle
+  #############################################################
+
+    # write points
+    points_out=""
+    j=0
+    for i in $points_in
+    do
+      if [ $j -eq 0 ]
+      then
+        x=$i
+      else
+        y=$i
+        ax=`iexpr "($x-$x1)*($x-$x2)"`
+        ay=`iexpr "($y-$y1)*($y-$y2)"`
+        if [ \( $ax -gt 0 \) -o \( $ay -gt 0 \) ]
+        then
+          points_out="$points_out $x $y"
+        else
+          x=`iexpr "$x+$dx"`
+          y=`iexpr "$y+$dy"`
+          points_out="$points_out $x $y"
+        fi
+      fi
+      j=`iexpr "1-$j"`
+    done
+
+  ;;
+
+  #############################################################
+  r*) # rotate all points
+  #############################################################
+
+    # write points
+    points_out=""
+    j=0
+    for i in $points_in
+    do
+      if [ $j -eq 0 ]
+      then
+        x=$i
+      else
+        y=$i
+        ax=`iexpr "$x-$xc"`
+        ay=`iexpr "$y-$yc"`
+        x=`iexpr "$xc+$ct*$ax+$st*$ay"`
+        y=`iexpr "$yc-$st*$ax+$ct*$ay"`
+        points_out="$points_out $x $y"
+      fi
+      j=`iexpr "1-$j"`
+    done
+
+  ;;
+
+  #############################################################
+  R*) # rotate points enclosed by the rectangle
+  #############################################################
+
+    # write points
+    points_out=""
+    j=0
+    for i in $points_in
+    do
+      if [ $j -eq 0 ]
+      then
+        x=$i
+      else
+        y=$i
+        ax=`iexpr "($x-$x1)*($x-$x2)"`
+        ay=`iexpr "($y-$y1)*($y-$y2)"`
+        if [ \( $ax -gt 0 \) -o \( $ay -gt 0 \) ]
+        then
+          points_out="$points_out $x $y"
+        else
+          ax=`iexpr "$x-$xm"`
+          ay=`iexpr "$y-$ym"`
+          x=`iexpr "$xm+$ct*$ax+$st*$ay"`
+          y=`iexpr "$ym-$st*$ax+$ct*$ay"`
+          points_out="$points_out $x $y"
+        fi
+      fi
+      j=`iexpr "1-$j"`
+    done
+
+  ;;
+
+  #############################################################
+  g*) # magnify all points
+  #############################################################
+
+    # write points
+    points_out=""
+    j=0
+    for i in $points_in
+    do
+      if [ $j -eq 0 ]
+      then
+        x=$i
+      else
+        y=$i
+        ax=`iexpr "$x-$xc"`
+        ay=`iexpr "$y-$yc"`
+        x=`iexpr "$xc+(1.0e-4*$rx)*$ax"`
+        y=`iexpr "$yc+(1.0e-4*$ry)*$ay"`
+        points_out="$points_out $x $y"
+      fi
+      j=`iexpr "1-$j"`
+    done
+
+  ;;
+
+  #############################################################
+  G*) # magnify points enclosed by the rectangle
+  #############################################################
+
+    # write points
+    points_out=""
+    j=0
+    for i in $points_in
+    do
+      if [ $j -eq 0 ]
+      then
+        x=$i
+      else
+        y=$i
+        ax=`iexpr "($x-$x1)*($x-$x2)"`
+        ay=`iexpr "($y-$y1)*($y-$y2)"`
+        if [ \( $ax -gt 0 \) -o \( $ay -gt 0 \) ]
+        then
+          points_out="$points_out $x $y"
+        else
+          x=`iexpr "$xm+(1.0e-4*$rx)*($x-$xm)"`
+          y=`iexpr "$ym+(1.0e-4*$ry)*($y-$ym)"`
+          points_out="$points_out $x $y"
+        fi
+      fi
+      j=`iexpr "1-$j"`
+    done
+
+  ;;
+
+  #############################################################
+  h*) # swap horisontally
+  #############################################################
+
+    # write points
+    points_out=""
+    j=0
+    for i in $points_in
+    do
+      if [ $j -eq 0 ]
+      then
+        x=$i
+      else
+        y=$i
+        x=`iexpr "2*$xc-$x"`
+        points_out="$points_out $x $y"
+      fi
+      j=`iexpr "1-$j"`
+    done
+
+  ;;
+
+  #############################################################
+  H*) # holisontally swap points enclosed by the rectancle
+  #############################################################
+
+    # write points
+    points_out=""
+    j=0
+    for i in $points_in
+    do
+      if [ $j -eq 0 ]
+      then
+        x=$i
+      else
+        y=$i
+        ax=`iexpr "($x-$x1)*($x-$x2)"`
+        ay=`iexpr "($y-$y1)*($y-$y2)"`
+        if [ \( $ax -gt 0 \) -o \( $ay -gt 0 \) ]
+        then
+          points_out="$points_out $x $y"
+        else
+          x=`iexpr "2*$xm-$x"`
+          points_out="$points_out $x $y"
+        fi
+      fi
+      j=`iexpr "1-$j"`
+    done
+
+  ;;
+
+  #############################################################
+  v*) # swap vertically
+  #############################################################
+
+    # write points
+    points_out=""
+    j=0
+    for i in $points_in
+    do
+      if [ $j -eq 0 ]
+      then
+        x=$i
+      else
+        y=$i
+        y=`iexpr "2*$yc-$y"`
+        points_out="$points_out $x $y"
+      fi
+      j=`iexpr "1-$j"`
+    done
+
+  ;;
+
+  #############################################################
+  V*) # vertically swap points enclosed by the rectancle
+  #############################################################
+
+    # write points
+    points_out=""
+    j=0
+    for i in $points_in
+    do
+      if [ $j -eq 0 ]
+      then
+        x=$i
+      else
+        y=$i
+        ax=`iexpr "($x-$x1)*($x-$x2)"`
+        ay=`iexpr "($y-$y1)*($y-$y2)"`
+        if [ \( $ax -gt 0 \) -o \( $ay -gt 0 \) ]
+        then
+          points_out="$points_out $x $y"
+        else
+          y=`iexpr "2*$ym-$y"`
+          points_out="$points_out $x $y"
+        fi
+      fi
+      j=`iexpr "1-$j"`
+    done
+
+  ;;
+
+  #############################################################
+  u*) # undo
+  #############################################################
+
+    # check the undo buffer
+    if exist text:points_undo >/dev/null
+    then
+      put text:points_undo name:points_undo
+      put $object:$id points:"${text::text}"
+      del text
+    else
+      new dialog
+      dialog::message:'Cannot undo'
+      del dialog
+      exit
+    fi
+
+    # redraw screen
+    gra::clear
+    gra::draw
+
+    exit
+  ;;
+
+  #############################################################
+  U*) # add points to the undo buffer
+  #############################################################
+
+    # create the undo buffer
+    if exist text:points_undo >/dev/null
+      then
+    put text:points_undo name:points_undo
+    else
+      new text name:points_undo
+      text::hidden=true
+    fi
+
+    # add points to the undo buffer
+    text::text="${text::text} $points_in"
+
+    exit
+  ;;
+
+  #############################################################
+  *) # invalid command
+  #############################################################
+
+    new dialog
+    dialog::message:'Invalid command'
+    del dialog
+    exit
+
+  ;;
+
+esac
+
+###############################################################
+
+# save points to an undo text
+if exist text:points_undo >/dev/null
+then
+  put text:points_undo name:points_undo
+else
+  new text name:points_undo
+  text::hidden=true
+fi
+text::text="$points_in"
+
+# set points
+put $object:$id points:"$points_out"
+
+# redraw screen
+gra::clear
+gra::draw
